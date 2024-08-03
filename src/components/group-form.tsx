@@ -68,7 +68,7 @@ export function GroupForm({
       : {
           name: '',
           information: '',
-          currency: '',
+          currency: '₹',
           participants: [
             { name: t('Participants.John') },
             { name: t('Participants.Jane') },

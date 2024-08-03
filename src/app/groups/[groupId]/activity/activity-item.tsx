@@ -16,9 +16,10 @@ type Props = {
   dateStyle: DateTimeStyle
 }
 
-function useSummary(activity: Activity, participantName?: string) {
+export function useSummary(activity: Activity, participantName?: string) {
   const t = useTranslations('Activity')
   const participant = participantName ?? t('someone')
+
   const expense = activity.data ?? ''
 
   const tr = (key: string) =>

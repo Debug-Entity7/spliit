@@ -94,6 +94,9 @@ export const expenseFormSchema = z
       .default('EVENLY'),
     saveDefaultSplittingOptions: z.boolean(),
     isReimbursement: z.boolean(),
+    recurringDays: z.string({
+      required_error: 'You must select recurring days.',
+    }),
     documents: z
       .array(
         z.object({
@@ -105,6 +108,12 @@ export const expenseFormSchema = z
       )
       .default([]),
     notes: z.string().optional(),
+    location: z
+      .object({
+        latitude: z.number().refine((val) => val > -90 && val < 90),
+        longitude: z.number().refine((val) => val > -180 && val < 180),
+      })
+      .nullable(),
   })
   .superRefine((expense, ctx) => {
     let sum = 0
@@ -149,6 +158,12 @@ export const expenseFormSchema = z
   })
 
 export type ExpenseFormValues = z.infer<typeof expenseFormSchema>
+
+export const commentFormSchema = z.object({
+  comment: z.string(),
+})
+
+export type CommentFormValues = z.infer<typeof commentFormSchema>
 
 export type SplittingOptions = {
   // Used for saving default splitting options in localStorage
