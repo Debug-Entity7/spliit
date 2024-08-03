@@ -1,5 +1,6 @@
 'use client'
 import { CategorySelector } from '@/components/category-selector'
+import { ExpenseActivityList } from '@/components/expense-activity-list'
 import { ExpenseDocumentsInput } from '@/components/expense-documents-input'
 import { SubmitButton } from '@/components/submit-button'
 import { Button } from '@/components/ui/button'
@@ -33,7 +34,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { getCategories, getExpense, getGroup, randomId } from '@/lib/api'
+import {
+  getActivities,
+  getCategories,
+  getExpense,
+  getGroup,
+  randomId,
+} from '@/lib/api'
 import { RuntimeFeatureFlags } from '@/lib/featureFlags'
 import { useActiveUser } from '@/lib/hooks'
 import {
@@ -45,18 +52,20 @@ import { cn } from '@/lib/utils'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Save } from 'lucide-react'
 import Link from 'next/link'
-import { useSearchParams } from 'next/navigation'
-import { useState } from 'react'
+import { ReadonlyURLSearchParams, useSearchParams } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { match } from 'ts-pattern'
 import { DeletePopup } from './delete-popup'
 import { extractCategoryFromTitle } from './expense-form-actions'
+import { ExpenseLocationInput } from './expense-location-input'
 import { Textarea } from './ui/textarea'
 
 export type Props = {
   group: NonNullable<Awaited<ReturnType<typeof getGroup>>>
   expense?: NonNullable<Awaited<ReturnType<typeof getExpense>>>
   categories: NonNullable<Awaited<ReturnType<typeof getCategories>>>
+  activities?: NonNullable<Awaited<ReturnType<typeof getActivities>>>
   onSubmit: (values: ExpenseFormValues, participantId?: string) => Promise<void>
   onDelete?: (participantId?: string) => Promise<void>
   runtimeFeatureFlags: RuntimeFeatureFlags
@@ -146,10 +155,22 @@ async function persistDefaultSplittingOptions(
   }
 }
 
+function getLocationFromSearchParams(
+  searchParams: ReadonlyURLSearchParams,
+): ExpenseFormValues['location'] {
+  return searchParams.get('latitude') && searchParams.get('longitude')
+    ? {
+        latitude: Number(searchParams.get('latitude')),
+        longitude: Number(searchParams.get('longitude')),
+      }
+    : null
+}
+
 export function ExpenseForm({
   group,
   expense,
   categories,
+  activities,
   onSubmit,
   onDelete,
   runtimeFeatureFlags,
@@ -166,6 +187,10 @@ export function ExpenseForm({
     return field?.value
   }
   const defaultSplittingOptions = getDefaultSplittingOptions(group)
+
+  const getRecurringField = (field?: { value: string }) => {
+    return field?.value
+  }
   const form = useForm<ExpenseFormValues>({
     resolver: zodResolver(expenseFormSchema),
     defaultValues: expense
@@ -184,6 +209,8 @@ export function ExpenseForm({
           isReimbursement: expense.isReimbursement,
           documents: expense.documents,
           notes: expense.notes ?? '',
+          recurringDays: String(expense.recurringDays),
+          location: expense.location,
         }
       : searchParams.get('reimbursement')
       ? {
@@ -207,6 +234,8 @@ export function ExpenseForm({
           saveDefaultSplittingOptions: false,
           documents: [],
           notes: '',
+          recurringDays: '0',
+          location: getLocationFromSearchParams(searchParams),
         }
       : {
           title: searchParams.get('title') ?? '',
@@ -234,6 +263,8 @@ export function ExpenseForm({
               ]
             : [],
           notes: '',
+          recurringDays: '0',
+          location: getLocationFromSearchParams(searchParams),
         },
   })
   const [isCategoryLoading, setCategoryLoading] = useState(false)
@@ -245,8 +276,83 @@ export function ExpenseForm({
   }
 
   const [isIncome, setIsIncome] = useState(Number(form.getValues().amount) < 0)
+  const [manuallyEditedParticipants, setManuallyEditedParticipants] = useState<
+    Set<string>
+  >(new Set())
   const sExpense = isIncome ? 'income' : 'expense'
   const sPaid = isIncome ? 'received' : 'paid'
+  const recurringDays = [
+    { key: 'Never', value: '0' },
+    { key: 'Weekly', value: '7' },
+    { key: 'Every 14 days', value: '14' },
+    { key: 'Every 30 days', value: '30' },
+    { key: 'Every 60 days', value: '60' },
+  ]
+
+  useEffect(() => {
+    setManuallyEditedParticipants(new Set())
+    const newPaidFor = defaultSplittingOptions.paidFor.map((participant) => ({
+      ...participant,
+      shares: String(participant.shares) as unknown as number,
+    }))
+    form.setValue('paidFor', newPaidFor, { shouldValidate: true })
+  }, [form.watch('splitMode'), form.watch('amount')])
+
+  useEffect(() => {
+    const totalAmount = Number(form.getValues().amount) || 0
+    const paidFor = form.getValues().paidFor
+    const splitMode = form.getValues().splitMode
+
+    let newPaidFor = [...paidFor]
+
+    if (
+      splitMode === 'EVENLY' ||
+      splitMode === 'BY_SHARES' ||
+      splitMode === 'BY_PERCENTAGE'
+    ) {
+      return
+    } else {
+      // Only auto-balance for split mode 'Unevenly - By amount'
+      const editedParticipants = Array.from(manuallyEditedParticipants)
+      let remainingAmount = totalAmount
+      let remainingParticipants = newPaidFor.length - editedParticipants.length
+
+      newPaidFor = newPaidFor.map((participant) => {
+        if (editedParticipants.includes(participant.participant)) {
+          const participantShare = Number(participant.shares) || 0
+          if (splitMode === 'BY_AMOUNT') {
+            remainingAmount -= participantShare
+          }
+          return participant
+        }
+        return participant
+      })
+
+      if (remainingParticipants > 0) {
+        let amountPerRemaining = 0
+        if (splitMode === 'BY_AMOUNT') {
+          amountPerRemaining = remainingAmount / remainingParticipants
+        }
+
+        newPaidFor = newPaidFor.map((participant) => {
+          if (!editedParticipants.includes(participant.participant)) {
+            return {
+              ...participant,
+              shares: String(
+                Number(amountPerRemaining.toFixed(2)),
+              ) as unknown as number,
+            }
+          }
+          return participant
+        })
+      }
+      form.setValue('paidFor', newPaidFor, { shouldValidate: true })
+    }
+  }, [
+    manuallyEditedParticipants,
+    form.watch('amount'),
+    form.watch('splitMode'),
+  ])
 
   return (
     <Form {...form}>
@@ -429,6 +535,34 @@ export function ExpenseForm({
                 </FormItem>
               )}
             />
+            <FormField
+              control={form.control}
+              name="recurringDays"
+              render={({ field }) => (
+                <FormItem className="sm:order-5">
+                  <FormLabel>Recurring Days</FormLabel>
+                  <Select
+                    onValueChange={field.onChange}
+                    defaultValue={getRecurringField(field)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Never" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {recurringDays.map(({ key, value }) => (
+                        <SelectItem key={key} value={value}>
+                          {key}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormDescription>
+                    Repeat: {'<'}Never|Every Day|Every...{'>'}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
           </CardContent>
         </Card>
 
@@ -570,7 +704,7 @@ export function ExpenseForm({
                                                   participant === id,
                                               )?.shares
                                             }
-                                            onChange={(event) =>
+                                            onChange={(event) => {
                                               field.onChange(
                                                 field.value.map((p) =>
                                                   p.participant === id
@@ -584,7 +718,10 @@ export function ExpenseForm({
                                                     : p,
                                                 ),
                                               )
-                                            }
+                                              setManuallyEditedParticipants(
+                                                (prev) => new Set(prev).add(id),
+                                              )
+                                            }}
                                             inputMode={
                                               form.getValues().splitMode ===
                                               'BY_AMOUNT'
@@ -698,6 +835,31 @@ export function ExpenseForm({
           </CardContent>
         </Card>
 
+        <Card className="mt-4">
+          <CardHeader>
+            <CardTitle className="flex justify-between">
+              <span>Location</span>
+            </CardTitle>
+            <CardDescription>Where was the {sExpense} made?</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <FormField
+              control={form.control}
+              name="location"
+              render={({ field }) => {
+                return (
+                  <FormItem>
+                    <ExpenseLocationInput
+                      location={field.value}
+                      updateLocation={field.onChange}
+                    />
+                  </FormItem>
+                )
+              }}
+            />
+          </CardContent>
+        </Card>
+
         {runtimeFeatureFlags.enableExpenseDocuments && (
           <Card className="mt-4">
             <CardHeader>
@@ -740,6 +902,28 @@ export function ExpenseForm({
           </Button>
         </div>
       </form>
+
+      {!isCreate && activities && (
+        <Card className="mb-4">
+          <CardHeader>
+            <CardTitle className="flex justify-between">
+              Expense History
+            </CardTitle>
+            <CardDescription>
+              Previous Activity for this expense.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col space-y-4">
+            <ExpenseActivityList
+              {...{
+                group,
+                expense,
+                activities,
+              }}
+            />
+          </CardContent>
+        </Card>
+      )}
     </Form>
   )
 }

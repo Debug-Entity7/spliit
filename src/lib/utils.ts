@@ -48,3 +48,18 @@ export function formatFileSize(size: number) {
   if (size > 1024) return `${formatNumber(size / 1024)} kB`
   return `${formatNumber(size)} B`
 }
+
+export function getEpochTimeInSeconds(date: Date | null) {
+  const reqDate = date ? new Date(date) : new Date()
+  return Math.floor(reqDate.getTime() / 1000)
+}
+
+export function normalizeString(input: string): string {
+  // Replaces special characters
+  // Input: áäåèéę
+  // Output: aaaeee
+  return input
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+}

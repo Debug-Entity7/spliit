@@ -38,6 +38,7 @@ import { Save, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useFieldArray, useForm } from 'react-hook-form'
+import { Textarea } from './ui/textarea'
 
 export type Props = {
   group?: NonNullable<Awaited<ReturnType<typeof getGroup>>>
@@ -58,13 +59,19 @@ export function GroupForm({
     defaultValues: group
       ? {
           name: group.name,
+          information: group.information ?? '',
           currency: group.currency,
           participants: group.participants,
         }
       : {
           name: '',
-          currency: '',
-          participants: [{ name: 'John' }, { name: 'Jane' }, { name: 'Jack' }],
+          information: '',
+          currency: '₹',
+          participants: [
+            { name: 'Little' },
+            { name: 'Sibu' },
+            { name: 'Ninni' },
+          ],
         },
   })
   const { fields, append, remove } = useFieldArray({
@@ -144,7 +151,7 @@ export function GroupForm({
                   <FormControl>
                     <Input
                       className="text-base"
-                      placeholder="$, €, £…"
+                      placeholder="₹, $, £…"
                       max={5}
                       {...field}
                     />
@@ -156,6 +163,27 @@ export function GroupForm({
                 </FormItem>
               )}
             />
+
+            <div className="col-span-2">
+              <FormField
+                control={form.control}
+                name="information"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Group Information</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        rows={10}
+                        className="text-base"
+                        {...field}
+                        placeholder="Use this for group information."
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
           </CardContent>
         </Card>
 
